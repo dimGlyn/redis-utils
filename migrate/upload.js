@@ -8,10 +8,12 @@ const { parser } = require('stream-json/Parser');
 const { argv } = require('yargs')
   .default('h', '127.0.0.1')
   .default('p', 6379)
+  .default('d', 0)
   .default('filename', 'dump.json');
 
 const host = argv.h;
 const port = argv.p;
+const db = argv.d;
 const { filename } = argv;
 
 const startTime = new Date();
@@ -22,7 +24,8 @@ const promises = [];
 
 const redis = new Redis({
   host,
-  port
+  port,
+  db
 });
 
 const pipeline = fs.createReadStream(filename).pipe(parser());

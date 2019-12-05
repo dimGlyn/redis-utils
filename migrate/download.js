@@ -7,11 +7,13 @@ const fs = require('fs');
 const { argv } = require('yargs')
   .default('h', '127.0.0.1')
   .default('p', 6379)
+  .default('d', 0)
   .default('pattern', '*')
   .default('filename', 'dump.json');
 
 const host = argv.h;
 const port = argv.p;
+const db = argv.d;
 const { pattern } = argv;
 const { filename } = argv;
 
@@ -22,7 +24,8 @@ const startTime = new Date();
 
 const redis = new Redis({
   host,
-  port
+  port,
+  db
 });
 
 // Delete previous file
@@ -41,42 +44,36 @@ const stream = redis.scanStream({
   count: 10000
 });
 
-console.log(`\n*********** START SCANNING FOR PATTERN ${pattern} ***********`);
+// console.log(`\n*********** START SCANNING FOR PATTERN ${pattern} ***********`);
 
-stream.on('data', (resultKeys) => {
+stream.on('data', async(resultKeys) => {
   roundCount += 1;
-  console.log(`\nFound ${resultKeys.length} keys on this round. Round count: ${roundCount}`);
+  // console.log(`\nFound ${resultKeys.length} keys on this round. Round count: ${roundCount}`);
   // Check if we have something to get
   if (resultKeys.length > 0) {
     // Pause scanning
     stream.pause();
-    const keyValues = {};
-    console.log('Getting values');
-    console.log(resultKeys);
-    redis.mget(resultKeys)
-      .then((resultValues) => {
-        console.log(`Got ${resultValues.length} values`);
-        for (let i = 0; i < resultKeys.length; i++) {
-          keyValues[resultKeys[i]] = resultValues[i];
-        }
-        keyCount += resultKeys.length;
+    // console.log('Getting values');
+    // console.log(resultKeys);
+    try {
+      const keyValues = await getValues(resultKeys);
+      console.log(keyValues);
+      keyCount += resultKeys.length;
+      // console.log('Write key-values to file');
+      // console.log(keyValues);
+      fs.appendFileSync(fd, sep + JSON.stringify(keyValues), 'utf8');
+      sep = ',';
 
-        // Write the object to file
-        console.log('Write key-values to file');
-        fs.appendFileSync(fd, sep + JSON.stringify(keyValues), 'utf8');
-        sep = ',';
-
-        // Resume scanning
-        stream.resume();
-      })
-      .catch((reason) => {
-        console.log(`Error on mget: ${reason}`);
-        process.exit(1);
-      });
+      // Resume scanning
+      stream.resume();
+    } catch (err) {
+      // console.log(`Error on mget: ${err}`);
+      process.exit(1);
+    }
   }
 });
 stream.on('end', () => {
-  console.log('\n*********** SCAN FINISHED ***********');
+  // console.log('\n*********** SCAN FINISHED ***********');
 
   // Close file
   fs.appendFileSync(fd, ']', 'utf8');
@@ -89,9 +86,9 @@ stream.on('end', () => {
   const executionTimeStr = millisecondsToStr(executionTimeMs);
 
   // Summary
-  console.log(`\nNumber of rounds: ${roundCount}`);
-  console.log(`Number of keyValues found: ${keyCount}`);
-  console.log(`Filename: ${filename}`);
+  // console.log(`\nNumber of rounds: ${roundCount}`);
+  // console.log(`Number of keyValues found: ${keyCount}`);
+  // console.log(`Filename: ${filename}`);
   console.info(`Execution time: ${executionTimeStr}`);
   process.exit();
 });
@@ -116,4 +113,30 @@ function millisecondsToStr(milliseconds) {
     return `${seconds} second${numberEnding(seconds)}`;
   }
   return 'Less than a second';
+}
+
+async function getValues (resultKeys) {
+  const keyValues = {};
+  const types = [];
+  const job = new Promise((resolve) => {
+    resultKeys.forEach(async(key, i) => {
+      const type = await redis.type(key);
+      let value;
+      if (type === 'hash') {
+        value = redis.hgetall(key);
+      } else {
+        if (!types.includes(type)) {
+          types.push(type);
+        }
+        value = redis.mget(key);
+      }
+      const keyValue = await value;
+      keyValues[resultKeys[i]] = keyValue;
+      if (i === resultKeys.length - 1) {
+        resolve();
+      }
+    });
+  });
+  await job;
+  return keyValues;
 }
