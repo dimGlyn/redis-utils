@@ -44,30 +44,63 @@ const stream = redis.scanStream({
   count: 10000
 });
 
-// console.log(`\n*********** START SCANNING FOR PATTERN ${pattern} ***********`);
+const getValues = async(resultKeys) => {
+  const keyValues = {};
+  const types = [];
+  // const types = resultKeys.reduce((acum, curr) => acum.push(redis.type(curr)), []);
+  await Promise.all(resultKeys.map(async(key, i) => {
+    let type = await redis.type(key);
+    let value;
+    switch(type) {
+      case 'hash':
+        value = redis.hgetall(key);
+        break;
+      case 'set':
+        value = redis.smembers(key);
+        break;
+      case 'list':
+        value = redis.lrange(key, 0, -1);
+        break;
+      case 'string':
+          value = redis.mget(key);
+          break;
+      default:
+        if (!types.includes(type)) {
+          types.push(type);
+          console.log(key)
+        }
+    }
+    const keyValue = await value;
+    keyValues[resultKeys[i]] = keyValue;
+  }));
+  if (types.length > 0) {
+    console.log('We should support these types: ', types);
+  }
+  return keyValues;
+};
+
+
+console.log(`\n*********** START SCANNING FOR PATTERN ${pattern} ***********`);
 
 stream.on('data', async(resultKeys) => {
   roundCount += 1;
-  // console.log(`\nFound ${resultKeys.length} keys on this round. Round count: ${roundCount}`);
+  console.log(`\nFound ${resultKeys.length} keys on this round. Round count: ${roundCount}`);
   // Check if we have something to get
   if (resultKeys.length > 0) {
     // Pause scanning
     stream.pause();
-    // console.log('Getting values');
-    // console.log(resultKeys);
+    console.log('Getting values');
     try {
       const keyValues = await getValues(resultKeys);
-      console.log(keyValues);
       keyCount += resultKeys.length;
-      // console.log('Write key-values to file');
-      // console.log(keyValues);
+      console.log('Writing key-values to file');
       fs.appendFileSync(fd, sep + JSON.stringify(keyValues), 'utf8');
       sep = ',';
 
       // Resume scanning
       stream.resume();
     } catch (err) {
-      // console.log(`Error on mget: ${err}`);
+      console.log(`Error on get: ${err}`);
       process.exit(1);
     }
   }
@@ -113,30 +146,4 @@ function millisecondsToStr(milliseconds) {
     return `${seconds} second${numberEnding(seconds)}`;
   }
   return 'Less than a second';
-}
-
-async function getValues (resultKeys) {
-  const keyValues = {};
-  const types = [];
-  const job = new Promise((resolve) => {
-    resultKeys.forEach(async(key, i) => {
-      const type = await redis.type(key);
-      let value;
-      if (type === 'hash') {
-        value = redis.hgetall(key);
-      } else {
-        if (!types.includes(type)) {
-          types.push(type);
-        }
-        value = redis.mget(key);
-      }
-      const keyValue = await value;
-      keyValues[resultKeys[i]] = keyValue;
-      if (i === resultKeys.length - 1) {
-        resolve();
-      }
-    });
-  });
-  await job;
-  return keyValues;
 }
