@@ -35,7 +35,6 @@ if (fs.existsSync(filename)) {
 
 // Create new fil with '['
 const fd = fs.openSync(filename, 'a');
-
 fs.appendFileSync(fd, '[', 'utf8');
 
 // Start scanning
@@ -48,30 +47,32 @@ const getValues = async(resultKeys) => {
   const keyValues = {};
   const types = [];
   // const types = resultKeys.reduce((acum, curr) => acum.push(redis.type(curr)), []);
-  await Promise.all(resultKeys.map(async(key, i) => {
-    let type = await redis.type(key);
+  await Promise.all(resultKeys.map(async(key) => {
+    const type = await redis.type(key);
     let value;
-    switch(type) {
+    switch (type) {
       case 'hash':
-        value = redis.hgetall(key);
+        value = await redis.hgetall(key);
         break;
       case 'set':
-        value = redis.smembers(key);
+        value = await redis.smembers(key);
+        console.log(key);
         break;
       case 'list':
-        value = redis.lrange(key, 0, -1);
+        value = await redis.lrange(key, 0, -1);
         break;
       case 'string':
-          value = redis.mget(key);
-          break;
+        value = await redis.get(key);
+        break;
       default:
         if (!types.includes(type)) {
           types.push(type);
-          console.log(key)
         }
     }
-    const keyValue = await value;
-    keyValues[resultKeys[i]] = keyValue;
+    keyValues[key] = {
+      type,
+      value
+    };
   }));
   if (types.length > 0) {
     console.log('We should support these types: ', types);
@@ -106,7 +107,7 @@ stream.on('data', async(resultKeys) => {
   }
 });
 stream.on('end', () => {
-  // console.log('\n*********** SCAN FINISHED ***********');
+  console.log('\n*********** SCAN FINISHED ***********');
 
   // Close file
   fs.appendFileSync(fd, ']', 'utf8');
@@ -119,9 +120,9 @@ stream.on('end', () => {
   const executionTimeStr = millisecondsToStr(executionTimeMs);
 
   // Summary
-  // console.log(`\nNumber of rounds: ${roundCount}`);
-  // console.log(`Number of keyValues found: ${keyCount}`);
-  // console.log(`Filename: ${filename}`);
+  console.log(`\nNumber of rounds: ${roundCount}`);
+  console.log(`Number of keyValues found: ${keyCount}`);
+  console.log(`Filename: ${filename}`);
   console.info(`Execution time: ${executionTimeStr}`);
   process.exit();
 });
