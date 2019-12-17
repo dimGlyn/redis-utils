@@ -33,8 +33,14 @@ if (fs.existsSync(filename)) {
   fs.unlinkSync(filename);
 }
 
+if (fs.existsSync('usedCodes.json')) {
+  fs.unlinkSync('usedCodes.json');
+}
+
 // Create new fil with '['
 const fd = fs.openSync(filename, 'a');
+const fu = fs.openSync('usedCodes.json', 'a');
+
 fs.appendFileSync(fd, '[', 'utf8');
 
 // Start scanning
@@ -97,6 +103,9 @@ stream.on('data', async(resultKeys) => {
       console.log('Writing key-values to file');
       fs.appendFileSync(fd, sep + JSON.stringify(keyValues), 'utf8');
       sep = ',';
+      if (keyValues['joi:shortURLCodes:usedCodes']) {
+        fs.appendFileSync(fu, JSON.stringify({ 'joi:shortURLCodes:usedCodes': keyValues['joi:shortURLCodes:usedCodes'] }));
+      }
 
       // Resume scanning
       stream.resume();
@@ -113,6 +122,9 @@ stream.on('end', () => {
   fs.appendFileSync(fd, ']', 'utf8');
   if (fd !== undefined) {
     fs.closeSync(fd);
+  }
+  if (fu !== undefined) {
+    fs.closeSync(fu);
   }
 
   // Stop timer
